@@ -214,6 +214,45 @@
         .product-status .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
         .product-checked { font-size: 0.75rem; color: var(--text-muted); }
         
+        .filter-bar {
+            display: grid;
+            grid-template-columns: 1fr repeat(2, minmax(140px, 180px));
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .filter-bar input, .filter-bar select {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+        }
+        .filter-bar input:focus, .filter-bar select:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+        .cron-toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .mini-btn {
+            padding: 6px 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .mini-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .filter-hint { font-size: 0.75rem; color: var(--text-muted); }
         .cron-table { width: 100%; }
         .cron-row {
             display: grid;
@@ -278,6 +317,7 @@
             .cron-row { grid-template-columns: 1fr auto; }
             .cron-schedule { display: none; }
             .header-status { flex-direction: column; align-items: flex-end; gap: 8px; }
+            .filter-bar { grid-template-columns: 1fr; }
         }
         
         @keyframes flash-update { 0% { background-color: rgba(34,197,94,0.2); } 100% { background-color: transparent; } }
@@ -357,6 +397,25 @@
                 <span class="icon">⏰</span>
                 <h2>Cron Jobs</h2>
             </div>
+            <div class="filter-bar">
+                <input id="global-search" type="text" placeholder="Search tasks, products, cron jobs, activity…" aria-label="Search dashboard" />
+                <select id="priority-filter" aria-label="Filter action priority">
+                    <option value="all">All priorities</option>
+                    <option value="high">High priority</option>
+                    <option value="medium">Medium priority</option>
+                    <option value="low">Low priority</option>
+                </select>
+                <select id="cron-filter" aria-label="Filter cron jobs">
+                    <option value="all">All cron jobs</option>
+                    <option value="error">Errors only</option>
+                    <option value="ok">Healthy only</option>
+                    <option value="paused">Paused only</option>
+                </select>
+            </div>
+            <div class="cron-toolbar">
+                <div class="filter-hint" id="filter-summary">Showing all items</div>
+                <button class="mini-btn" id="toggle-errors-btn" onclick="toggleAllCronErrors()">Expand all errors</button>
+            </div>
             <div class="cron-table" id="cron-table"></div>
         </div>
     </div>
@@ -374,6 +433,13 @@
 
         let lastUpdateTime = null;
         let updateTickerInterval;
+        let latestData = null;
+        const uiState = {
+            search: '',
+            priority: 'all',
+            cron: 'all',
+            expandAllErrors: false
+        };
 
         function checkPassword() {
             const input = document.getElementById('pin-input').value;
@@ -436,6 +502,23 @@
         }
 
         function initDashboard() {
+            const searchEl = document.getElementById('global-search');
+            const priorityEl = document.getElementById('priority-filter');
+            const cronEl = document.getElementById('cron-filter');
+
+            searchEl.addEventListener('input', (e) => {
+                uiState.search = (e.target.value || '').trim().toLowerCase();
+                if (latestData) renderDashboard(latestData);
+            });
+            priorityEl.addEventListener('change', (e) => {
+                uiState.priority = e.target.value;
+                if (latestData) renderDashboard(latestData);
+            });
+            cronEl.addEventListener('change', (e) => {
+                uiState.cron = e.target.value;
+                if (latestData) renderDashboard(latestData);
+            });
+
             fetchData();
             updateLastUpdatedTicker();
             updateTickerInterval = setInterval(updateLastUpdatedTicker, 1000);
@@ -443,14 +526,21 @@
         }
 
         function renderDashboard(data) {
+            latestData = data;
             const now = new Date();
+            const q = uiState.search;
+            const matches = (parts=[]) => !q || parts.some(v => (v || '').toString().toLowerCase().includes(q));
 
             // Action Required
             const actionBanner = document.getElementById('action-required');
             const actionItems = document.getElementById('action-items');
-            if (data.actionRequired && data.actionRequired.length > 0) {
+            const filteredAction = (data.actionRequired || []).filter(item =>
+                (uiState.priority === 'all' || item.priority === uiState.priority) &&
+                matches([item.title, item.priority, item.url])
+            );
+            if (filteredAction.length > 0) {
                 actionBanner.classList.remove('empty');
-                actionItems.innerHTML = data.actionRequired.map(item => `
+                actionItems.innerHTML = filteredAction.map(item => `
                     <div class="alert-item">
                         <div class="alert-item-content">
                             <span class="priority ${item.priority}">${item.priority}</span>
@@ -477,8 +567,9 @@
 
             // Active Now
             const activeTasks = document.getElementById('active-tasks');
-            if (data.activeNow && data.activeNow.length > 0) {
-                activeTasks.innerHTML = data.activeNow.map(task => {
+            const filteredActive = (data.activeNow || []).filter(task => matches([task.task, task.model]));
+            if (filteredActive.length > 0) {
+                activeTasks.innerHTML = filteredActive.map(task => {
                     const started = new Date(task.startedAt);
                     const mins = Math.floor((now - started) / 60000);
                     return `
@@ -492,13 +583,14 @@
                     `;
                 }).join('');
             } else {
-                activeTasks.innerHTML = '<div class="empty-state">✨ All quiet — no active tasks</div>';
+                activeTasks.innerHTML = `<div class="empty-state">${q ? 'No active tasks match your search' : '✨ All quiet — no active tasks'}</div>`;
             }
 
             // Products
             const productsGrid = document.getElementById('products-grid');
-            if (data.products && data.products.length > 0) {
-                productsGrid.innerHTML = data.products.map(product => `
+            const filteredProducts = (data.products || []).filter(product => matches([product.name, product.status, product.url]));
+            if (filteredProducts.length > 0) {
+                productsGrid.innerHTML = filteredProducts.map(product => `
                     <a href="${escapeHtml(product.url)}" target="_blank" rel="noopener" class="product-card">
                         <div class="product-name">${escapeHtml(product.name)}</div>
                         <div class="product-status ${product.status}">
@@ -509,23 +601,34 @@
                     </a>
                 `).join('');
             } else {
-                productsGrid.innerHTML = '<div class="empty-state">No products configured</div>';
+                productsGrid.innerHTML = `<div class="empty-state">${q ? 'No products match your search' : 'No products configured'}</div>`;
             }
 
             // Cron Jobs
             const cronTable = document.getElementById('cron-table');
-            if (data.crons && data.crons.length > 0) {
-                const sortedCrons = [...data.crons].sort((a, b) => {
+            const filteredCrons = (data.crons || []).filter(cron => {
+                const byType = uiState.cron === 'all' ||
+                    (uiState.cron === 'error' && (cron.errors > 0 || cron.status === 'error')) ||
+                    (uiState.cron === 'ok' && cron.status === 'ok' && (cron.errors || 0) === 0) ||
+                    (uiState.cron === 'paused' && cron.status === 'paused');
+                return byType && matches([cron.name, cron.schedule, cron.status, cron.lastError]);
+            });
+            const filterSummary = document.getElementById('filter-summary');
+            filterSummary.textContent = `Showing ${filteredCrons.length} cron jobs${q ? ` · query: "${q}"` : ''}`;
+
+            if (filteredCrons.length > 0) {
+                const sortedCrons = [...filteredCrons].sort((a, b) => {
                     if (a.errors > 0 && b.errors === 0) return -1;
                     if (b.errors > 0 && a.errors === 0) return 1;
                     if (a.status === 'paused' && b.status !== 'paused') return 1;
                     if (b.status === 'paused' && a.status !== 'paused') return -1;
                     return 0;
                 });
-                cronTable.innerHTML = sortedCrons.map(cron => {
+                cronTable.innerHTML = sortedCrons.map((cron, i) => {
                     const statusIcon = cron.status === 'ok' ? '✅' : cron.status === 'error' ? '❌' : cron.status === 'paused' ? '⏸️' : '⚪';
+                    const rowExpanded = uiState.expandAllErrors && !!cron.lastError;
                     return `
-                        <div class="cron-row ${cron.errors > 0 ? 'has-error' : ''}" onclick="this.classList.toggle('expanded')">
+                        <div class="cron-row ${cron.errors > 0 ? 'has-error' : ''} ${rowExpanded ? 'expanded' : ''}" onclick="this.classList.toggle('expanded')">
                             <div>
                                 <div class="cron-name">${escapeHtml(cron.name)}</div>
                                 <div class="cron-schedule">${escapeHtml(cron.schedule)}</div>
@@ -537,13 +640,14 @@
                     `;
                 }).join('');
             } else {
-                cronTable.innerHTML = '<div class="empty-state">No cron jobs configured</div>';
+                cronTable.innerHTML = '<div class="empty-state">No cron jobs match your filters</div>';
             }
 
             // Recent Activity
             const activityList = document.getElementById('activity-list');
-            if (data.recentActivity && data.recentActivity.length > 0) {
-                activityList.innerHTML = data.recentActivity.slice(0, 10).map(activity => {
+            const filteredActivity = (data.recentActivity || []).filter(activity => matches([activity.event, activity.time]));
+            if (filteredActivity.length > 0) {
+                activityList.innerHTML = filteredActivity.slice(0, 10).map(activity => {
                     const time = new Date(activity.time);
                     const hours = time.getHours().toString().padStart(2, '0');
                     const mins = time.getMinutes().toString().padStart(2, '0');
@@ -557,6 +661,14 @@
             } else {
                 activityList.innerHTML = '<div class="empty-state">No recent activity</div>';
             }
+        }
+
+
+        function toggleAllCronErrors() {
+            uiState.expandAllErrors = !uiState.expandAllErrors;
+            const btn = document.getElementById('toggle-errors-btn');
+            btn.textContent = uiState.expandAllErrors ? 'Collapse all errors' : 'Expand all errors';
+            if (latestData) renderDashboard(latestData);
         }
 
         function formatTime(isoString) {
