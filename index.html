@@ -256,7 +256,7 @@
         .cron-table { width: 100%; }
         .cron-row {
             display: grid;
-            grid-template-columns: 1fr auto auto auto;
+            grid-template-columns: 1fr auto auto auto auto;
             gap: 12px;
             padding: 12px;
             border-radius: 8px;
@@ -275,6 +275,32 @@
             border-radius: 10px;
             background: rgba(239,68,68,0.2);
             color: var(--accent-red);
+        }
+        .cron-actions { display: flex; gap: 8px; justify-self: end; }
+        .cron-run-btn {
+            padding: 5px 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-light);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .cron-run-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .cron-run-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .action-toast {
+            position: fixed;
+            right: 18px;
+            bottom: 18px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border-light);
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 0.82rem;
+            z-index: 9999;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
         }
         .cron-error-detail {
             display: none;
@@ -427,7 +453,8 @@
         const CONFIG = {
             PIN: '322079',  // Change this!
             DATA_URL: './data/dashboard-data.json',  // Path to your JSON file
-            REFRESH_INTERVAL: 30000  // 30 seconds
+            REFRESH_INTERVAL: 30000,  // 30 seconds
+            ACTION_ENDPOINT: '' // Optional: POST endpoint for cron actions
         };
         // ============================================
 
@@ -440,6 +467,7 @@
             cron: 'all',
             expandAllErrors: false
         };
+        const pendingCronRuns = new Set();
 
         function checkPassword() {
             const input = document.getElementById('pin-input').value;
@@ -635,6 +663,9 @@
                             </div>
                             <div class="cron-status">${statusIcon}</div>
                             ${cron.errors > 0 ? `<div class="cron-errors">${cron.errors} errors</div>` : ''}
+                            <div class="cron-actions">
+                                <button class="cron-run-btn" ${pendingCronRuns.has(cron.name) ? 'disabled' : ''} onclick="runCronNow(event, ${JSON.stringify(cron.name)})">${pendingCronRuns.has(cron.name) ? 'Running…' : 'Run now'}</button>
+                            </div>
                             ${cron.lastError ? `<div class="cron-error-detail">${escapeHtml(cron.lastError)}</div>` : ''}
                         </div>
                     `;
@@ -663,6 +694,42 @@
             }
         }
 
+
+
+        function showToast(message, isError = false) {
+            const el = document.createElement('div');
+            el.className = 'action-toast';
+            el.textContent = message;
+            if (isError) el.style.borderColor = 'var(--accent-red)';
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 2600);
+        }
+
+        async function runCronNow(event, cronName) {
+            event.stopPropagation();
+            if (!CONFIG.ACTION_ENDPOINT) {
+                showToast('Run action is not configured yet (set CONFIG.ACTION_ENDPOINT).', true);
+                return;
+            }
+            if (pendingCronRuns.has(cronName)) return;
+            pendingCronRuns.add(cronName);
+            if (latestData) renderDashboard(latestData);
+            try {
+                const res = await fetch(CONFIG.ACTION_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'cron.run', cronName, source: 'mission-control-tier2' })
+                });
+                if (!res.ok) throw new Error('Request failed');
+                showToast(`Run requested for “${cronName}”`);
+            } catch (e) {
+                console.error(e);
+                showToast(`Failed to run “${cronName}”`, true);
+            } finally {
+                pendingCronRuns.delete(cronName);
+                if (latestData) renderDashboard(latestData);
+            }
+        }
 
         function toggleAllCronErrors() {
             uiState.expandAllErrors = !uiState.expandAllErrors;
