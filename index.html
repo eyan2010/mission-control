@@ -454,7 +454,8 @@
             PIN: '322079',  // Change this!
             DATA_URL: './data/dashboard-data.json',  // Path to your JSON file
             REFRESH_INTERVAL: 30000,  // 30 seconds
-            ACTION_ENDPOINT: '' // Optional: POST endpoint for cron actions
+            ACTION_ENDPOINT: '', // Optional: HTTPS endpoint for cron actions
+            ACTION_TOKEN: '' // Optional: Bearer token for action endpoint
         };
         // ============================================
 
@@ -715,9 +716,11 @@
             pendingCronRuns.add(cronName);
             if (latestData) renderDashboard(latestData);
             try {
+                const headers = { 'Content-Type': 'application/json' };
+                if (CONFIG.ACTION_TOKEN) headers['Authorization'] = `Bearer ${CONFIG.ACTION_TOKEN}`;
                 const res = await fetch(CONFIG.ACTION_ENDPOINT, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers,
                     body: JSON.stringify({ action: 'cron.run', cronName, source: 'mission-control-tier2' })
                 });
                 if (!res.ok) throw new Error('Request failed');
