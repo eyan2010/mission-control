@@ -10,6 +10,9 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         :root {
+            --glow-a: rgba(86,163,255,0.20);
+            --glow-b: rgba(154,123,255,0.20);
+            --glow-c: rgba(46,216,163,0.12);
             --bg-primary: #07090f;
             --bg-secondary: #0d1220;
             --bg-tertiary: #141b2d;
@@ -30,9 +33,9 @@
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background:
-                radial-gradient(1200px 700px at -10% -20%, rgba(86,163,255,0.20), transparent 55%),
-                radial-gradient(900px 500px at 110% -10%, rgba(154,123,255,0.20), transparent 55%),
-                radial-gradient(1000px 800px at 50% 130%, rgba(46,216,163,0.12), transparent 55%),
+                radial-gradient(1200px 700px at -10% -20%, var(--glow-a), transparent 55%),
+                radial-gradient(900px 500px at 110% -10%, var(--glow-b), transparent 55%),
+                radial-gradient(1000px 800px at 50% 130%, var(--glow-c), transparent 55%),
                 linear-gradient(180deg, #06080e 0%, #090d18 100%);
             color: var(--text-primary);
             min-height: 100vh;
@@ -364,6 +367,70 @@
             .filter-bar { grid-template-columns: 1fr; }
         }
         
+
+        body.theme-neon {
+            --accent-blue: #22d3ee;
+            --accent-purple: #e879f9;
+            --accent-green: #34d399;
+            --glow-a: rgba(34,211,238,0.26);
+            --glow-b: rgba(232,121,249,0.22);
+            --glow-c: rgba(52,211,153,0.18);
+        }
+        body.theme-minimal {
+            --accent-blue: #93c5fd;
+            --accent-purple: #c4b5fd;
+            --accent-green: #86efac;
+            --glow-a: rgba(147,197,253,0.10);
+            --glow-b: rgba(196,181,253,0.10);
+            --glow-c: rgba(134,239,172,0.08);
+        }
+        .theme-select {
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--border-light);
+            background: rgba(15,20,35,0.75);
+            color: var(--text-secondary);
+            font-size: .78rem;
+            font-weight: 600;
+        }
+        .kpi-spark { margin-left: 6px; opacity: .9; }
+        .spark {
+            display: inline-flex;
+            align-items: end;
+            gap: 2px;
+            height: 14px;
+            vertical-align: middle;
+        }
+        .spark i {
+            display: block;
+            width: 3px;
+            border-radius: 3px;
+            background: linear-gradient(180deg,var(--accent-blue),var(--accent-purple));
+            opacity: .9;
+        }
+        .cmdk-overlay {
+            position: fixed; inset: 0; background: rgba(4,6,12,.55);
+            backdrop-filter: blur(6px);
+            display:none; align-items:flex-start; justify-content:center;
+            padding-top: 10vh; z-index: 1200;
+        }
+        .cmdk-box {
+            width:min(760px,92vw);
+            border:1px solid var(--border-light);
+            border-radius:14px;
+            background: linear-gradient(180deg, rgba(20,28,45,.95), rgba(14,20,34,.95));
+            box-shadow: 0 20px 60px rgba(0,0,0,.45);
+            overflow:hidden;
+        }
+        .cmdk-input {
+            width:100%; padding:14px 16px; border:none; outline:none;
+            background:transparent; color:var(--text-primary); font-size:.95rem;
+            border-bottom:1px solid var(--border);
+        }
+        .cmdk-list { max-height: 320px; overflow:auto; }
+        .cmdk-item { padding: 11px 14px; cursor:pointer; color:var(--text-secondary); }
+        .cmdk-item:hover, .cmdk-item.active { background: var(--bg-hover); color: var(--text-primary); }
+
         @keyframes fadeUp { from { opacity: 0; transform: translateY(8px);} to {opacity:1; transform: translateY(0);} }
         @keyframes flash-update { 0% { background-color: rgba(34,197,94,0.2); } 100% { background-color: transparent; } }
         .flash-update { animation: flash-update 1s ease-out; }
@@ -389,6 +456,11 @@
                 <div><h1>Mission Control</h1><div style="font-size:.75rem;color:var(--text-muted);margin-top:2px;">Operational cockpit · live view</div></div>
             </div>
             <div class="header-status">
+                <select id="theme-select" class="theme-select" aria-label="Theme">
+                    <option value="default">Midnight</option>
+                    <option value="neon">Neon</option>
+                    <option value="minimal">Minimal</option>
+                </select>
                 <button class="refresh-btn" onclick="forceUpdate()" id="refresh-btn" aria-label="Force update">
                     <span class="icon">🔄</span>
                     <span class="spinner">⟳</span>
@@ -465,6 +537,14 @@
         </div>
     </div>
 
+
+    <div class="cmdk-overlay" id="cmdk-overlay" onclick="if(event.target.id==='cmdk-overlay') toggleCmdk(false)">
+        <div class="cmdk-box">
+            <input id="cmdk-input" class="cmdk-input" placeholder="Type a command… (theme neon, filter errors, refresh, clear search)" />
+            <div class="cmdk-list" id="cmdk-list"></div>
+        </div>
+    </div>
+
     <script>
         // ============================================
         // CONFIGURATION — Edit these values
@@ -488,6 +568,15 @@
             expandAllErrors: false
         };
         const pendingCronRuns = new Set();
+        const cmdkItems = [
+            {label:'Refresh dashboard', run: () => forceUpdate()},
+            {label:'Filter cron: errors only', run: () => {document.getElementById('cron-filter').value='error'; uiState.cron='error'; renderDashboard(latestData||{});}},
+            {label:'Filter cron: paused only', run: () => {document.getElementById('cron-filter').value='paused'; uiState.cron='paused'; renderDashboard(latestData||{});}},
+            {label:'Clear all filters', run: () => {document.getElementById('cron-filter').value='all'; document.getElementById('priority-filter').value='all'; document.getElementById('global-search').value=''; uiState.cron='all'; uiState.priority='all'; uiState.search=''; renderDashboard(latestData||{});}},
+            {label:'Theme: Midnight', run: () => applyTheme('default')},
+            {label:'Theme: Neon', run: () => applyTheme('neon')},
+            {label:'Theme: Minimal', run: () => applyTheme('minimal')}
+        ];
 
         function checkPassword() {
             const input = document.getElementById('pin-input').value;
@@ -567,6 +656,21 @@
                 if (latestData) renderDashboard(latestData);
             });
 
+            const themeSel = document.getElementById('theme-select');
+            themeSel.addEventListener('change', (e)=> applyTheme(e.target.value));
+            const storedTheme = localStorage.getItem('mc_theme') || 'default';
+            themeSel.value = storedTheme;
+            applyTheme(storedTheme);
+
+            document.addEventListener('keydown', (e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); toggleCmdk(true); }
+                if (e.key === '/') {
+                    const t = document.activeElement?.tagName?.toLowerCase();
+                    if (t !== 'input' && t !== 'textarea') { e.preventDefault(); document.getElementById('global-search').focus(); }
+                }
+            });
+            initCmdk();
+
             fetchData();
             updateLastUpdatedTicker();
             updateTickerInterval = setInterval(updateLastUpdatedTicker, 1000);
@@ -607,8 +711,8 @@
             const pausedCrons = data.crons?.filter(c => c.status === 'paused').length || 0;
             const errorCrons = data.crons?.filter(c => c.errors > 0).length || 0;
             statsRow.innerHTML = `
-                <div class="stat-pill"><span class="num">${data.products?.length || 0}</span><span class="label">Products</span></div>
-                <div class="stat-pill"><span class="num">${enabledCrons}</span><span class="label">Active Crons</span></div>
+                <div class="stat-pill"><span class="num">${data.products?.length || 0}</span><span class="label">Products</span><span class="kpi-spark">${spark([4,7,5,8,6,9])}</span></div>
+                <div class="stat-pill"><span class="num">${enabledCrons}</span><span class="label">Active Crons</span><span class="kpi-spark">${spark([5,5,6,7,7,8])}</span></div>
                 <div class="stat-pill"><span class="num">${pausedCrons}</span><span class="label">Paused</span></div>
                 ${errorCrons > 0 ? `<div class="stat-pill" style="border-color:var(--accent-red);"><span class="num" style="color:var(--accent-red);">${errorCrons}</span><span class="label">Errors</span></div>` : ''}
             `;
@@ -758,6 +862,52 @@
             const btn = document.getElementById('toggle-errors-btn');
             btn.textContent = uiState.expandAllErrors ? 'Collapse all errors' : 'Expand all errors';
             if (latestData) renderDashboard(latestData);
+        }
+
+
+        function spark(values) {
+            return `<span class="spark">${values.map(v => `<i style="height:${Math.max(4,v)}px"></i>`).join('')}</span>`;
+        }
+
+        function applyTheme(mode) {
+            document.body.classList.remove('theme-neon','theme-minimal');
+            if (mode === 'neon') document.body.classList.add('theme-neon');
+            if (mode === 'minimal') document.body.classList.add('theme-minimal');
+            localStorage.setItem('mc_theme', mode);
+        }
+
+        function toggleCmdk(show) {
+            const o = document.getElementById('cmdk-overlay');
+            o.style.display = show ? 'flex' : 'none';
+            if (show) {
+                const input = document.getElementById('cmdk-input');
+                input.value = '';
+                renderCmdk('');
+                setTimeout(() => input.focus(), 10);
+            }
+        }
+
+        function renderCmdk(query) {
+            const q = (query || '').toLowerCase().trim();
+            const list = document.getElementById('cmdk-list');
+            const items = cmdkItems.filter(i => !q || i.label.toLowerCase().includes(q));
+            list.innerHTML = items.map((i,idx)=>`<div class="cmdk-item ${idx===0?'active':''}" data-idx="${idx}">${i.label}</div>`).join('');
+            list.querySelectorAll('.cmdk-item').forEach(el => {
+                el.addEventListener('click', () => { items[Number(el.dataset.idx)].run(); toggleCmdk(false); });
+            });
+            list.dataset.filtered = JSON.stringify(items.map(i=>i.label));
+        }
+
+        function initCmdk() {
+            const input = document.getElementById('cmdk-input');
+            input.addEventListener('input', (e)=> renderCmdk(e.target.value));
+            input.addEventListener('keydown', (e)=> {
+                if (e.key === 'Escape') toggleCmdk(false);
+                if (e.key === 'Enter') {
+                    const first = document.querySelector('.cmdk-item');
+                    if (first) first.click();
+                }
+            });
         }
 
         function formatTime(isoString) {
